@@ -1,0 +1,52 @@
+---
+layout: default
+templatebodyclass: "default line"
+maxZoom: 17
+minZoom: 11
+---
+{% assign geojson = '' %}
+
+<script>
+    window.line_geojson = window.line_geojson || [];
+    {% for json_file in site.data.geojson %}
+        {% if json_file[0] == page.geojson %}
+            {% assign geojson = json_file[1] %}
+            window.line_geojson.push( {
+                source: {{ json_file[0] | jsonify }},
+                data: {{ json_file[1] | jsonify }} 
+            } );
+
+        {% break %}
+
+        {% endif %}
+    {% endfor %}
+    window.map_config = new Object;
+    window.map_config.maxZoom = {{ page.maxZoom }};
+    window.map_config.minZoom = {{ page.minZoom }};
+</script>
+
+<div class="scroll-container">
+    <div class="scroll-container__fixed">
+        {% include map.html simple=false %}
+    </div>
+    <div class="scroll-container__scrollable">
+
+        {{ page.content }}
+
+       
+
+    </div>
+</div>
+
+{% assign update_size = page.revisions | size %}
+{% if update_size >= 1 %}
+    <aside class="author-note">
+        <h3 id="Updates">Updates and Revisions</h3>
+        <dl>
+            {% for update in page.revisions %}
+                <dt><time datetime="{{ update.date | date: '%f' }}">{{ update.date | date_to_long_string }}</time></dt>
+                <dd>{{update.text}}</dd>
+            {% endfor %}
+        </dl>
+    </aside>
+{% endif %}

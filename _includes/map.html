@@ -1,0 +1,260 @@
+<!-- Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.8.0/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.8.0/dist/leaflet.js"></script>
+
+<!-- Maplibre GL -->
+<link href="https://unpkg.com/maplibre-gl@2.2.1/dist/maplibre-gl.css" rel='stylesheet' />
+<script src="https://unpkg.com/maplibre-gl@2.2.1/dist/maplibre-gl.js"></script>
+
+<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.0.20/leaflet-maplibre-gl.js"></script>
+
+<!-- the container -->
+<figure id="map-container" >
+	<div id="leaflet-map" style="height: 100%; width: 100%;"></div>
+</figure>
+
+<script type="text/javascript">
+
+var defaultIcon = new L.Icon.Default();
+
+function add_geojson_to_map( data, index ) {
+    new GeoJSONConverter( data, index );
+}
+
+class GeoJSONConverter {
+    simple;
+    source;
+    features;
+    line;
+    line_url;
+
+    constructor( data, index ) {
+        // expect an object with source and data keys
+        // this line includes Liquid
+        this.simple = {{include.simple | jsonify}};
+        this.source = data.source;
+        this.features = data.data;
+        this.line_url = data.link;
+        this.line = window.lines.find( object => object.source === this.source );
+
+        /**
+         * then define a window.lines array of lines with metadata, including color
+         * then match the line to this data based on the index/key
+         * then save the color in this class
+         * then use this class property to pass the color to the icons
+         */
+        L.geoJSON( this.features, {
+            onEachFeature: this.onEachFeature.bind(this),
+            pointToLayer: this.pointToLayer.bind(this),
+            style: this.stylePaths.bind(this),
+            filter: this.visibility_filter.bind(this)
+        }).addTo(window.map);
+    }
+
+    /**
+     * Bind popups and do other things
+     * 
+     * This bit from https://tomik23.github.io/leaflet-examples/#15.geoJson-simple
+     */
+    onEachFeature(feature, layer) {
+        let connections = '';
+        let color = this.chooseColor( feature.properties.stroke, feature );
+        let description = feature.properties.description;
+        let title = feature.properties.name;
+        var offset = [0,7];
+
+        // create popups
+
+        if (feature.properties.connections) {
+            connections = `<p class="connections">Connections: ${feature.properties.connections}</p>`;
+        }
+
+        if (feature.properties.type && feature.properties.type === 'stop') {
+            offset = [-16, -32];
+        }
+
+        if ( this.simple ) {
+            description = '<a href="' + this.line_url + '">Click for more information about this line.</a>'
+            title = `<span class="route-underline-color" style="text-decoration-color: ${color}">${this.line.slug}</span>: ${title}`;
+        } else {
+            description = feature.properties.description; 
+        }
+        layer.bindPopup(
+            `<p class="title">${title}</p><p class="description">${description}</p> ${connections}`,
+            {
+                className: `${feature.properties.icon}`,
+                autoPanPaddingTopLeft: '20px',
+                autoPanPaddingBottomRight: '20px',
+                keepInView: true,
+                offset
+            }
+        );
+    }
+
+    /**
+     * turn a geojson point into an marker for a layer
+     * 
+     * this bit from https://leafletjs.com/examples/geojson/
+     */
+    pointToLayer(feature, latlng) {
+        var options = {};
+        options.icon = this.return_Icon(feature, feature.properties.icon);
+        options.riseOnHover = true;
+        options.autoPanOnFocus = true;
+
+        let marker = L.marker( latlng, options );
+        window.FeatureGroup_all.addLayer( marker );
+        return marker;
+    }
+
+    /**
+     * Return a simple icon for simple maps
+     * 
+     * @param {object} feature The 
+     * @param {string} type
+     */
+    return_Icon( feature, type = 'simple' ) {
+
+        let color = this.chooseColor( feature.properties.stroke, feature );
+        let id = this.featureToMarkerID( feature );
+
+        if ( this.simple ) {
+            return new L.DivIcon({
+                className: 'icon-custom icon-simple ' + id,
+                html: '<div style="background-color:' + color + '"></div>',
+                iconAnchor: [0,0],
+                iconSize: 10
+            });
+        }
+
+        var innerContents = '';
+        var iconAnchor = [36, 36];
+        var iconSize = [32, 32];
+        var className = `icon-custom icon-${type} ${id}`;
+
+        switch (type) {
+            case 'bridge':
+            case 'tunnel':
+                iconAnchor = [0,0];
+                break;
+            case 'construction':
+                innerContents = '🚧';
+                iconAnchor = [0,0];
+                break;
+            case 'amtrak':
+            case 'station':
+            case 'tram':
+            case 'apm':
+                innerContents = `<span class="stop-id">${feature.properties.id}</span>`;
+                className += ' hastext';
+                iconSize = [56, 32];
+                break;
+        }
+
+        return new L.DivIcon({
+            html: `<div style="background-color: ${color};'">${innerContents}</div>`,
+            className,
+            iconSize,
+            iconAnchor
+        });
+    }
+
+    /**
+     * Give a feature a deterministic ID
+     */
+    featureToMarkerID( feature ) {
+        return 'marker-' + feature.properties.type + '-' + feature.properties.id;
+    }
+
+    /**
+     * Given some colors, and the page context, determine which color to use for this object
+     */
+    chooseColor( feature_color, feature ) {
+        if ( feature.type && feature.type === 'construction ' ) {
+            return 'orange';
+        }
+        if ( this.simple ) {
+            return this.line.color;
+        }
+        if ( ! feature_color ) {
+            return this.line.color;
+        }
+        if ( ! feature_color && ! this.line.color ) {
+            return black;
+        }
+        return feature_color;
+    }
+
+    /**
+     *  Style paths, from https://gis.stackexchange.com/questions/158227/leaflet-geojson-problem-with-style
+     */
+    stylePaths(feature) {
+        feature.color     = this.chooseColor( feature.properties['stroke'] , feature);
+        feature.stroke    = this.chooseColor( feature.properties['stroke'] , feature);
+        feature.dashArray = feature.properties['dashArray'] ??= null;
+
+        if (feature.properties.type && feature.properties.type === 'construction') {
+            feature.weight    = feature.properties['stroke-width'] ??= 3;
+        } else {
+            feature.weight    = feature.properties['stroke-width'] ??= 5;
+        }
+        return feature;
+    };
+
+    /**
+     * Control whether a given feature displays on this page
+     */
+    visibility_filter(feature, layer) {
+        if ( this.simple ) {
+            return ( feature.properties.simple === 'true' );
+        }
+        return true;
+    }
+};
+
+/**
+ * Initialize the map
+ */
+function init () {
+    window.map_config = window.map_config ?? {};
+    window.map = L.map(
+        'leaflet-map',
+        {
+            minZoom: window.map_config.minZoom ?? 11,
+            maxZoom: window.map_config.maxZoom ?? 17
+        }
+    ).setView([40, -83.00], 12);
+
+    var stamen = L.maplibreGL({
+        style: 'https://tiles.stadiamaps.com/styles/stamen_toner_lite.json',
+        maxZoom: 17,
+        attribution: '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://www.stamen.com/" target="_blank">Stamen Design</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        ext: 'png'
+    });
+    window.FeatureGroup_all = new L.FeatureGroup();
+
+    window.map.addLayer(stamen);
+    window.line_geojson.forEach( (data) => add_geojson_to_map( data ) );
+    window.map.fitBounds( FeatureGroup_all.getBounds() );
+
+    window.map.on(
+        'popupopen',
+        (popupevent) => {
+            window.map.panTo( popupevent.popup.getLatLng());
+        }
+    );
+};
+
+init();
+
+/**
+ * Given a map ID, find it and focus on its Marker.
+ * 
+ * This assumes that IDs are selectors.
+ */
+function zoom_to_feature( id ) {
+    window.map.setZoom(14);
+    document.querySelector( id ).click();
+};
+
+</script>
